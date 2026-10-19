@@ -100,21 +100,32 @@ pub fn wants_coreml(env: rustler::env::Env, eps: &[Atom]) -> bool {
             .any(|e| e.to_term(env).atom_to_string().unwrap() == COREML)
 }
 
-/// Takes a vec of Atoms and transforms them into a vec of ExecutionProvider Enums.
-/// With the `coreml` feature on, CoreML is left out: `model::init` registers it.
-pub fn map_eps(env: rustler::env::Env, eps: Vec<Atom>) -> Vec<ExecutionProviderDispatch> {
+/// Takes a vec of Atoms and transforms them into ExecutionProvider dispatches,
+/// each paired with the name it was requested by. With the `coreml` feature
+/// on, CoreML is left out: `model::init` registers it.
+///
+/// Every dispatch is built with `error_on_failure`. `ort`'s default is to log a
+/// failed registration through `tracing`, which Ortex never subscribes to, and
+/// to run the session on the CPU. A caller that asked for an accelerator then
+/// gets a CPU session at a fraction of the speed and no word why; with
+/// `error_on_failure` the load fails with ONNX Runtime's reason instead.
+pub fn map_eps(env: rustler::env::Env, eps: Vec<Atom>) -> Vec<(String, ExecutionProviderDispatch)> {
     eps.iter()
-        .filter(|e| !(cfg!(feature = "coreml") && e.to_term(env).atom_to_string().unwrap() == COREML))
-        .map(|e| match &e.to_term(env).atom_to_string().unwrap()[..] {
-            CPU => ort::CPUExecutionProvider::default().build(),
-            CUDA => ort::CUDAExecutionProvider::default().build(),
-            TENSORRT => ort::TensorRTExecutionProvider::default().build(),
-            ACL => ort::ACLExecutionProvider::default().build(),
-            ONEDNN => ort::OneDNNExecutionProvider::default().build(),
-            COREML => ort::CoreMLExecutionProvider::default().build(),
-            DIRECTML => ort::DirectMLExecutionProvider::default().build(),
-            ROCM => ort::ROCmExecutionProvider::default().build(),
-            _ => ort::CPUExecutionProvider::default().build(),
+        .map(|e| e.to_term(env).atom_to_string().unwrap())
+        .filter(|name| !(cfg!(feature = "coreml") && name == COREML))
+        .map(|name| {
+            let ep = match &name[..] {
+                CPU => ort::CPUExecutionProvider::default().build(),
+                CUDA => ort::CUDAExecutionProvider::default().build(),
+                TENSORRT => ort::TensorRTExecutionProvider::default().build(),
+                ACL => ort::ACLExecutionProvider::default().build(),
+                ONEDNN => ort::OneDNNExecutionProvider::default().build(),
+                COREML => ort::CoreMLExecutionProvider::default().build(),
+                DIRECTML => ort::DirectMLExecutionProvider::default().build(),
+                ROCM => ort::ROCmExecutionProvider::default().build(),
+                _ => ort::CPUExecutionProvider::default().build(),
+            };
+            (name, ep.error_on_failure())
         })
         .collect()
 }
