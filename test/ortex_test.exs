@@ -32,6 +32,22 @@ defmodule OrtexTest do
     end
   end
 
+  describe "execution providers" do
+    # DirectML exists only on Windows, so no build here can register it.
+    test "a provider that cannot be registered fails the load and names it" do
+      error =
+        assert_raise RuntimeError, fn ->
+          Ortex.load("./models/tinymodel.onnx", [:directml, :cpu])
+        end
+
+      assert error.message =~ "execution provider :directml was requested"
+    end
+
+    test "a CPU-only request still loads" do
+      assert %Ortex.Model{} = Ortex.load("./models/tinymodel.onnx", [:cpu])
+    end
+  end
+
   describe "intra_threads" do
     test "a session capped at one intra-op thread still runs the model" do
       model = Ortex.load("./models/tinymodel.onnx", [:cpu], 3, intra_threads: 1)

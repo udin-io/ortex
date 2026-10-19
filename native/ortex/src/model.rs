@@ -37,7 +37,7 @@ unsafe impl Sync for OrtexModel {}
 /// core and honours `ORT_INTRA_OP_NUM_THREADS` when set in the OS environment.
 pub fn init(
     model_path: String,
-    eps: Vec<ExecutionProviderDispatch>,
+    eps: Vec<(String, ExecutionProviderDispatch)>,
     opt: i32,
     intra_threads: Option<usize>,
 ) -> Result<OrtexModel, Error> {
@@ -50,9 +50,18 @@ pub fn init(
         builder = builder.with_intra_threads(threads)?;
     }
 
-    let session = builder
-        .with_execution_providers(eps)?
-        .commit_from_file(model_path)?;
+    // One provider at a time, so a failed registration names the provider it
+    // belongs to. Each call appends to the session options in request order,
+    // which is the order ONNX Runtime assigns nodes in.
+    for (name, ep) in eps {
+        builder = builder.with_execution_providers([ep]).map_err(|e| {
+            Error::new(format!(
+                "execution provider :{name} was requested and ONNX Runtime could not register it: {e}"
+            ))
+        })?;
+    }
+
+    let session = builder.commit_from_file(model_path)?;
 
     let state = OrtexModel { session };
     Ok(state)

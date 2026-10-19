@@ -18,6 +18,11 @@ defmodule Ortex do
   `config.exs` where `EXECUTION_PROVIDERS` is a list of strings of which execution providers
   to enable.
 
+  A provider that cannot be registered fails the load and names the provider,
+  whether its Cargo feature is off or ONNX Runtime refuses it (a provider
+  library that does not load, a CUDA without a device). `ort` would otherwise
+  run the session on the CPU and say so only through `tracing`.
+
   ## Options
 
     * `:intra_threads` - the number of threads ONNX Runtime spreads a single
@@ -29,7 +34,6 @@ defmodule Ortex do
   ## Examples
 
       iex> Ortex.load("./models/tinymodel.onnx")
-      iex> Ortex.load("./models/tinymodel.onnx", [:cuda, :cpu])
       iex> Ortex.load("./models/tinymodel.onnx", [:cpu], 0)
       iex> Ortex.load("./models/tinymodel.onnx", [:cpu], 3, intra_threads: 2)
 

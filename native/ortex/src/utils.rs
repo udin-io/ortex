@@ -90,19 +90,30 @@ pub fn to_binary<'a>(
     Ok(reference.make_binary(env, |x| x.to_bytes()))
 }
 
-/// Takes a vec of Atoms and transforms them into a vec of ExecutionProvider Enums
-pub fn map_eps(env: rustler::env::Env, eps: Vec<Atom>) -> Vec<ExecutionProviderDispatch> {
+/// Takes a vec of Atoms and transforms them into ExecutionProvider dispatches,
+/// each paired with the name it was requested by.
+///
+/// Every dispatch is built with `error_on_failure`. `ort`'s default is to log a
+/// failed registration through `tracing`, which Ortex never subscribes to, and
+/// to run the session on the CPU. A caller that asked for an accelerator then
+/// gets a CPU session at a fraction of the speed and no word why; with
+/// `error_on_failure` the load fails with ONNX Runtime's reason instead.
+pub fn map_eps(env: rustler::env::Env, eps: Vec<Atom>) -> Vec<(String, ExecutionProviderDispatch)> {
     eps.iter()
-        .map(|e| match &e.to_term(env).atom_to_string().unwrap()[..] {
-            CPU => ort::CPUExecutionProvider::default().build(),
-            CUDA => ort::CUDAExecutionProvider::default().build(),
-            TENSORRT => ort::TensorRTExecutionProvider::default().build(),
-            ACL => ort::ACLExecutionProvider::default().build(),
-            ONEDNN => ort::OneDNNExecutionProvider::default().build(),
-            COREML => ort::CoreMLExecutionProvider::default().build(),
-            DIRECTML => ort::DirectMLExecutionProvider::default().build(),
-            ROCM => ort::ROCmExecutionProvider::default().build(),
-            _ => ort::CPUExecutionProvider::default().build(),
+        .map(|e| {
+            let name = e.to_term(env).atom_to_string().unwrap();
+            let ep = match &name[..] {
+                CPU => ort::CPUExecutionProvider::default().build(),
+                CUDA => ort::CUDAExecutionProvider::default().build(),
+                TENSORRT => ort::TensorRTExecutionProvider::default().build(),
+                ACL => ort::ACLExecutionProvider::default().build(),
+                ONEDNN => ort::OneDNNExecutionProvider::default().build(),
+                COREML => ort::CoreMLExecutionProvider::default().build(),
+                DIRECTML => ort::DirectMLExecutionProvider::default().build(),
+                ROCM => ort::ROCmExecutionProvider::default().build(),
+                _ => ort::CPUExecutionProvider::default().build(),
+            };
+            (name, ep.error_on_failure())
         })
         .collect()
 }
