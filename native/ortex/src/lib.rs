@@ -5,6 +5,7 @@
 //! directly.
 
 mod constants;
+mod gate;
 mod model;
 mod tensor;
 mod utils;

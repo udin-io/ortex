@@ -8,6 +8,7 @@
 //! let (inputs, outputs) = show(model)?;
 //! ```
 
+use crate::gate::{RunGate, GPU_RUNS};
 use crate::tensor::OrtexTensor;
 use crate::utils::{is_bool_input, map_opt_level};
 use std::convert::TryInto;
@@ -22,6 +23,9 @@ use rustler::Atom;
 /// are threadsafe so this can be called concurrently from the beam.
 pub struct OrtexModel {
     pub session: ort::Session,
+    /// Holds a GPU session's first run of each input shape apart from every
+    /// other run; see `crate::gate`.
+    gate: RunGate,
 }
 
 // Since we're only using the session for inference and
@@ -67,6 +71,10 @@ pub fn init(
         append_coreml(&builder, &coreml)?;
     }
 
+    let gated = eps
+        .iter()
+        .any(|(name, _)| name == crate::constants::CUDA || name == crate::constants::TENSORRT);
+
     // One provider at a time, so a failed registration names the provider it
     // belongs to. Each call appends to the session options in request order,
     // which is the order ONNX Runtime assigns nodes in.
@@ -80,7 +88,10 @@ pub fn init(
 
     let session = builder.commit_from_file(model_path)?;
 
-    let state = OrtexModel { session };
+    let state = OrtexModel {
+        session,
+        gate: RunGate::new(&GPU_RUNS, gated),
+    };
     Ok(state)
 }
 
@@ -180,6 +191,7 @@ pub fn run(
     let session: &ort::Session = &model.session;
 
     let mut ortified_inputs: Vec<ort::SessionInputValue> = Vec::new();
+    let shapes: Vec<Vec<usize>> = inputs.iter().map(|input| input.shape()).collect();
 
     for (elixir_input, onnx_input) in zip(inputs, &session.inputs) {
         let derefed_input: &OrtexTensor = &elixir_input;
@@ -196,7 +208,9 @@ pub fn run(
     }
 
     // Construct a Vec of ModelOutput enums based on the DynOrtTensor data type
-    let outputs = session.run(&ortified_inputs[..])?;
+    let outputs = model
+        .gate
+        .run(shapes, || session.run(&ortified_inputs[..]))?;
     let mut collected_outputs = Vec::new();
 
     for output_descriptor in &session.outputs {
