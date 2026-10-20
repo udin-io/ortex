@@ -86,7 +86,13 @@ pub fn init(
         })?;
     }
 
-    let session = builder.commit_from_file(model_path)?;
+    // Building a CUDA session allocates and copies on the GPU, the work that
+    // breaks another session's first-run algorithm search; see `crate::gate`.
+    let session = if gated {
+        crate::gate::alone(&GPU_RUNS, || builder.commit_from_file(model_path))?
+    } else {
+        builder.commit_from_file(model_path)?
+    };
 
     let state = OrtexModel {
         session,

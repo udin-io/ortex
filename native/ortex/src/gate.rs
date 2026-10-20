@@ -20,17 +20,33 @@
 //! takes the write side of a process-wide lock, which waits for every run in
 //! flight and holds the others back. Shapes it has run before take the read
 //! side and run side by side as before.
+//!
+//! A shape that fails its first `ALONE_ATTEMPTS` runs is treated as run: a
+//! session that fails every frame would otherwise hold every other GPU session
+//! back on every one of its frames. `alone/1` holds a session's creation
+//! apart from runs the same way, since building a CUDA session allocates and
+//! copies on the GPU too.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Mutex, RwLock};
 
 /// The lock every gated session in the process shares.
 pub static GPU_RUNS: RwLock<()> = RwLock::new(());
 
+/// How many failed runs of a shape still take the write side.
+pub const ALONE_ATTEMPTS: u32 = 3;
+
+/// Runs `f` while no gated run is in flight, holding them back meanwhile.
+pub fn alone<T>(lock: &RwLock<()>, f: impl FnOnce() -> T) -> T {
+    let _alone = lock.write().unwrap_or_else(|e| e.into_inner());
+    f()
+}
+
 pub struct RunGate {
     lock: &'static RwLock<()>,
     gated: bool,
-    seen: Mutex<HashSet<Vec<Vec<usize>>>>,
+    /// Failed lone runs per shape; `None` once a run of the shape succeeded.
+    tries: Mutex<HashMap<Vec<Vec<usize>>, Option<u32>>>,
 }
 
 impl RunGate {
@@ -39,12 +55,12 @@ impl RunGate {
         RunGate {
             lock,
             gated,
-            seen: Mutex::new(HashSet::new()),
+            tries: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Runs `f` for inputs of `shapes`, alone when this gate has not yet seen
-    /// `f` succeed on those shapes.
+    /// Runs `f` for inputs of `shapes`, alone until `f` has succeeded on those
+    /// shapes once or failed on them `ALONE_ATTEMPTS` times.
     pub fn run<T, E>(
         &self,
         shapes: Vec<Vec<usize>>,
@@ -54,24 +70,29 @@ impl RunGate {
             return f();
         }
 
-        let seen = self
-            .seen
+        let shared = match self
+            .tries
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .contains(&shapes);
+            .get(&shapes)
+        {
+            Some(None) => true,
+            Some(Some(failed)) => *failed >= ALONE_ATTEMPTS,
+            None => false,
+        };
 
-        if seen {
+        if shared {
             let _shared = self.lock.read().unwrap_or_else(|e| e.into_inner());
             f()
         } else {
-            let _alone = self.lock.write().unwrap_or_else(|e| e.into_inner());
-            let result = f();
+            let result = alone(self.lock, f);
+            let mut tries = self.tries.lock().unwrap_or_else(|e| e.into_inner());
 
             if result.is_ok() {
-                self.seen
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(shapes);
+                tries.insert(shapes, None);
+            } else {
+                let entry = tries.entry(shapes).or_insert(Some(0));
+                *entry = entry.map(|failed| failed + 1);
             }
 
             result
@@ -152,6 +173,52 @@ mod tests {
             .unwrap();
 
         assert_eq!(peak(4, |_| gate.clone(), vec![1, 3, 320, 320]), 1);
+    }
+
+    #[test]
+    fn a_shape_that_keeps_failing_stops_running_alone() {
+        let lock = lock();
+        let gate = Arc::new(RunGate::new(lock, true));
+
+        for _ in 0..ALONE_ATTEMPTS {
+            let _ = gate.run(vec![vec![1, 3, 640, 640]], || -> Result<(), ()> { Err(()) });
+        }
+
+        assert_eq!(peak(4, |_| gate.clone(), vec![1, 3, 640, 640]), 4);
+    }
+
+    #[test]
+    fn a_session_build_waits_for_runs_in_flight() {
+        let lock = lock();
+        let warm = Arc::new(RunGate::new(lock, true));
+        warm.run(vec![vec![1]], || -> Result<(), ()> { Ok(()) })
+            .unwrap();
+
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let overlapped = Arc::new(AtomicUsize::new(0));
+        let start = Arc::new(Barrier::new(2));
+
+        let runner = {
+            let (warm, in_flight, start) = (warm.clone(), in_flight.clone(), start.clone());
+            thread::spawn(move || {
+                warm.run(vec![vec![1]], || -> Result<(), ()> {
+                    in_flight.fetch_add(1, Ordering::SeqCst);
+                    start.wait();
+                    thread::sleep(Duration::from_millis(50));
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
+                })
+                .unwrap();
+            })
+        };
+
+        start.wait();
+        alone(lock, || {
+            overlapped.store(in_flight.load(Ordering::SeqCst), Ordering::SeqCst)
+        });
+        runner.join().unwrap();
+
+        assert_eq!(overlapped.load(Ordering::SeqCst), 0);
     }
 
     #[test]
