@@ -78,6 +78,65 @@ defmodule OrtexTest do
     end
   end
 
+  describe "versions" do
+    test "the runtime reports the ONNX Runtime version it loaded" do
+      assert Ortex.Native.runtime_version() =~ ~r/^1\.\d+\.\d+/
+    end
+
+    # No build here has the tensorrt feature, so no TensorRT can be loaded.
+    test "a build without TensorRT reports it as not loaded" do
+      assert Ortex.Native.tensorrt_version() == {:error, :not_loaded}
+    end
+  end
+
+  describe "tensorrt" do
+    test "its options leave a load that does not ask for TensorRT alone" do
+      model =
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3,
+          tensorrt: [cache_dir: "/tmp/engines", timing_cache_dir: "/tmp/timing", fp16: true]
+        )
+
+      assert %Ortex.Model{} = model
+    end
+
+    # Without the tensorrt feature `ort` cannot register the provider, so the
+    # load fails and names it, the same as any other provider.
+    test "asking for TensorRT on a build without it fails the load and names it" do
+      error =
+        assert_raise RuntimeError, fn ->
+          Ortex.load("./models/tinymodel.onnx", [:tensorrt, :cpu], 3,
+            tensorrt: [cache_dir: "/tmp/engines"]
+          )
+        end
+
+      assert error.message =~ "execution provider :tensorrt was requested"
+    end
+
+    test "a path must be a non-empty string with no NUL byte" do
+      for bad <- ["", "a\0b", :dir, 1] do
+        assert_raise ArgumentError, ~r/cache_dir/, fn ->
+          Ortex.load("./models/tinymodel.onnx", [:cpu], 3, tensorrt: [cache_dir: bad])
+        end
+      end
+    end
+
+    test "fp16 must be a boolean" do
+      assert_raise ArgumentError, ~r/fp16/, fn ->
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3, tensorrt: [fp16: "yes"])
+      end
+    end
+
+    test "an unknown option is refused rather than ignored" do
+      assert_raise ArgumentError, ~r/int8/, fn ->
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3, tensorrt: [int8: true])
+      end
+
+      assert_raise ArgumentError, ~r/keyword list/, fn ->
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3, tensorrt: "/tmp")
+      end
+    end
+  end
+
   test "Nx.Serving with tinymodel" do
     model = Ortex.load("./models/tinymodel.onnx")
 

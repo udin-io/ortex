@@ -25,14 +25,32 @@ defmodule Ortex.Native do
 
   # When loading a NIF module, dummy clauses for all NIF function are required.
   # NIF dummies usually just error out when called when the NIF is not loaded, as that should never normally happen.
-  def init(_model_path, _execution_providers, _optimization_level, _intra_threads, _coreml_cache_dir),
-    do: :erlang.nif_error(:nif_not_loaded)
+  def init(
+        _model_path,
+        _execution_providers,
+        _optimization_level,
+        _intra_threads,
+        _coreml_cache_dir,
+        _tensorrt
+      ),
+      do: :erlang.nif_error(:nif_not_loaded)
 
   def run(_model, _inputs), do: :erlang.nif_error(:nif_not_loaded)
   def from_binary(_bin, _shape, _type), do: :erlang.nif_error(:nif_not_loaded)
   def to_binary(_reference, _bits, _limit), do: :erlang.nif_error(:nif_not_loaded)
   def show_session(_model), do: :erlang.nif_error(:nif_not_loaded)
   def available_providers(), do: :erlang.nif_error(:nif_not_loaded)
+
+  # The ONNX Runtime library this process loaded, as its own
+  # `GetVersionString` reports it, such as "1.19.2".
+  def runtime_version(), do: :erlang.nif_error(:nif_not_loaded)
+
+  # `{:ok, "10.2.0"}` from the loaded `libnvinfer.so.10`'s
+  # `getInferLibVersion`, or `{:error, :not_loaded}` when the build has no
+  # `tensorrt` feature or the library does not load. It opens the library by
+  # the name ONNX Runtime's TensorRT provider links, so it reports the copy
+  # that provider runs on.
+  def tensorrt_version(), do: :erlang.nif_error(:nif_not_loaded)
 
   def slice(_tensor, _start_indicies, _lengths, _strides),
     do: :erlang.nif_error(:nif_not_loaded)

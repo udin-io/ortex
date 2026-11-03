@@ -71,9 +71,9 @@ pub fn init(
         append_coreml(&builder, &coreml)?;
     }
 
-    let gated = eps
-        .iter()
-        .any(|(name, _)| name == crate::constants::CUDA || name == crate::constants::TENSORRT);
+    let names: Vec<&str> = eps.iter().map(|(name, _)| name.as_str()).collect();
+    let gated = crate::tensorrt::gated(&names);
+    let builds_alone = crate::tensorrt::builds_alone(&names);
 
     // One provider at a time, so a failed registration names the provider it
     // belongs to. Each call appends to the session options in request order,
@@ -88,7 +88,9 @@ pub fn init(
 
     // Building a CUDA session allocates and copies on the GPU, the work that
     // breaks another session's first-run algorithm search; see `crate::gate`.
-    let session = if gated {
+    // A TensorRT build takes minutes and runs beside the others; see
+    // `crate::tensorrt::builds_alone`.
+    let session = if builds_alone {
         crate::gate::alone(&GPU_RUNS, || builder.commit_from_file(model_path))?
     } else {
         builder.commit_from_file(model_path)?

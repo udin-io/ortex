@@ -34,6 +34,15 @@ defmodule Ortex do
       next session on the same model skips the compile. CoreML recompiles
       only when the graph or the model's metadata changes, not its weights,
       so give each model file's content its own directory.
+    * `:tensorrt` - options for the `:tensorrt` provider, ignored when `eps`
+      does not ask for it:
+        * `:cache_dir` - where TensorRT writes the engine it builds and reads
+          it back on the next session. ONNX Runtime reuses an engine by this
+          path alone and never notices a new TensorRT, driver or model, so
+          give each combination its own directory.
+        * `:timing_cache_dir` - where TensorRT keeps its timing cache, which
+          speeds up later builds on the same card.
+        * `:fp16` - build the engine in half precision. Defaults to `false`.
 
   With the `coreml` feature, `:coreml` registers CoreML as an ML Program on
   the CPU and GPU, rather than through `ort`'s legacy NeuralNetwork flags.
