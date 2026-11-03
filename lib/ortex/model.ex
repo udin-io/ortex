@@ -23,11 +23,12 @@ defmodule Ortex.Model do
 
   @doc false
   def load(path, eps \\ [:cpu], opt \\ 3, options \\ []) do
-    options = Keyword.validate!(options, intra_threads: nil, coreml_cache_dir: nil)
+    options = Keyword.validate!(options, intra_threads: nil, coreml_cache_dir: nil, tensorrt: nil)
     intra_threads = intra_threads!(intra_threads: options[:intra_threads])
     cache_dir = cache_dir!(options[:coreml_cache_dir])
+    tensorrt = tensorrt!(options[:tensorrt])
 
-    case Ortex.Native.init(path, eps, opt, intra_threads, cache_dir) do
+    case Ortex.Native.init(path, eps, opt, intra_threads, cache_dir, tensorrt) do
       {:error, msg} ->
         raise msg
 
@@ -52,6 +53,44 @@ defmodule Ortex.Model do
   defp cache_dir!(dir) do
     raise ArgumentError,
           "expected :coreml_cache_dir to be a non-empty path, got: #{inspect(dir)}"
+  end
+
+  defp tensorrt!(nil), do: nil
+
+  defp tensorrt!(options) when is_list(options) do
+    if not Keyword.keyword?(options) do
+      raise ArgumentError, "expected :tensorrt to be a keyword list, got: #{inspect(options)}"
+    end
+
+    options = Keyword.validate!(options, cache_dir: nil, timing_cache_dir: nil, fp16: false)
+
+    {tensorrt_dir!(:cache_dir, options[:cache_dir]),
+     tensorrt_dir!(:timing_cache_dir, options[:timing_cache_dir]), fp16!(options[:fp16])}
+  end
+
+  defp tensorrt!(options) do
+    raise ArgumentError, "expected :tensorrt to be a keyword list, got: #{inspect(options)}"
+  end
+
+  defp tensorrt_dir!(_name, nil), do: nil
+
+  defp tensorrt_dir!(name, dir) when is_binary(dir) do
+    if dir == "" or String.contains?(dir, <<0>>) do
+      raise ArgumentError, "expected tensorrt #{inspect(name)} to be a non-empty path"
+    end
+
+    dir
+  end
+
+  defp tensorrt_dir!(name, dir) do
+    raise ArgumentError,
+          "expected tensorrt #{inspect(name)} to be a non-empty path, got: #{inspect(dir)}"
+  end
+
+  defp fp16!(fp16) when is_boolean(fp16), do: fp16
+
+  defp fp16!(fp16) do
+    raise ArgumentError, "expected tensorrt :fp16 to be a boolean, got: #{inspect(fp16)}"
   end
 
   @doc false

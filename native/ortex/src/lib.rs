@@ -8,6 +8,7 @@ mod constants;
 mod gate;
 mod model;
 mod tensor;
+mod tensorrt;
 mod utils;
 
 use model::OrtexModel;
@@ -25,9 +26,16 @@ fn init(
     opt: i32,
     intra_threads: Option<usize>,
     coreml_cache_dir: Option<String>,
+    tensorrt: Option<(Option<String>, Option<String>, bool)>,
 ) -> NifResult<ResourceArc<model::OrtexModel>> {
     let coreml = utils::wants_coreml(env, &eps);
-    let eps = utils::map_eps(env, eps);
+    let tensorrt = tensorrt.map(|(cache_dir, timing_cache_dir, fp16)| tensorrt::TensorRt {
+        cache_dir,
+        timing_cache_dir,
+        fp16,
+    });
+    let eps = utils::map_eps(env, eps, tensorrt.as_ref())
+        .map_err(|e| rustler::Error::Term(Box::new(e)))?;
     let coreml = coreml.then(|| model::CoreMl {
         cache_dir: coreml_cache_dir,
     });
@@ -42,6 +50,20 @@ fn init(
 #[rustler::nif]
 fn available_providers() -> NifResult<Vec<String>> {
     utils::available_providers().map_err(|e| rustler::Error::Term(Box::new(e)))
+}
+
+/// The version of the ONNX Runtime library this process loaded ("1.19.2").
+#[rustler::nif]
+fn runtime_version() -> NifResult<String> {
+    tensorrt::runtime_version().map_err(|e| rustler::Error::Term(Box::new(e)))
+}
+
+/// `{:ok, "10.2.0"}`, the TensorRT library this process uses, or
+/// `{:error, :not_loaded}` when the build has no TensorRT or the library does
+/// not load.
+#[rustler::nif(schedule = "DirtyIo")]
+fn tensorrt_version() -> Result<String, Atom> {
+    tensorrt::tensorrt_version().ok_or_else(constants::ortex_atoms::not_loaded)
 }
 
 #[rustler::nif]
@@ -128,6 +150,8 @@ rustler::init!(
         to_binary,
         show_session,
         available_providers,
+        runtime_version,
+        tensorrt_version,
         slice,
         reshape,
         concatenate

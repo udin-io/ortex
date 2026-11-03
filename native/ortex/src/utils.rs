@@ -3,6 +3,7 @@
 
 use crate::constants::*;
 use crate::tensor::OrtexTensor;
+use crate::tensorrt::TensorRt;
 use ndarray::{ArrayViewMut, Ix, IxDyn};
 
 use ndarray::ShapeError;
@@ -11,7 +12,9 @@ use rustler::resource::ResourceArc;
 use rustler::types::Binary;
 use rustler::{Atom, Env, NifResult};
 
-use ort::{ExecutionProviderDispatch, GraphOptimizationLevel};
+use ort::{
+    ArbitrarilyConfigurableExecutionProvider, ExecutionProviderDispatch, GraphOptimizationLevel,
+};
 
 /// A faster (unsafe) way of creating an Array from an Erlang binary
 fn initialize_from_raw_ptr<T>(ptr: *const T, shape: &[Ix]) -> ArrayViewMut<T, IxDyn> {
@@ -109,15 +112,33 @@ pub fn wants_coreml(env: rustler::env::Env, eps: &[Atom]) -> bool {
 /// to run the session on the CPU. A caller that asked for an accelerator then
 /// gets a CPU session at a fraction of the speed and no word why; with
 /// `error_on_failure` the load fails with ONNX Runtime's reason instead.
-pub fn map_eps(env: rustler::env::Env, eps: Vec<Atom>) -> Vec<(String, ExecutionProviderDispatch)> {
-    eps.iter()
+///
+/// `tensorrt` carries the engine cache options for the TensorRT provider; it is
+/// ignored when `eps` does not ask for TensorRT.
+pub fn map_eps(
+    env: rustler::env::Env,
+    eps: Vec<Atom>,
+    tensorrt: Option<&TensorRt>,
+) -> Result<Vec<(String, ExecutionProviderDispatch)>, String> {
+    let tensorrt_options = match tensorrt {
+        Some(trt) => trt.options()?,
+        None => Vec::new(),
+    };
+
+    Ok(eps
+        .iter()
         .map(|e| e.to_term(env).atom_to_string().unwrap())
         .filter(|name| !(cfg!(feature = "coreml") && name == COREML))
         .map(|name| {
             let ep = match &name[..] {
                 CPU => ort::CPUExecutionProvider::default().build(),
                 CUDA => ort::CUDAExecutionProvider::default().build(),
-                TENSORRT => ort::TensorRTExecutionProvider::default().build(),
+                TENSORRT => tensorrt_options
+                    .iter()
+                    .fold(ort::TensorRTExecutionProvider::default(), |ep, (k, v)| {
+                        ep.with_arbitrary_config(k, v)
+                    })
+                    .build(),
                 ACL => ort::ACLExecutionProvider::default().build(),
                 ONEDNN => ort::OneDNNExecutionProvider::default().build(),
                 COREML => ort::CoreMLExecutionProvider::default().build(),
@@ -127,7 +148,7 @@ pub fn map_eps(env: rustler::env::Env, eps: Vec<Atom>) -> Vec<(String, Execution
             };
             (name, ep.error_on_failure())
         })
-        .collect()
+        .collect())
 }
 
 /// Take an optimization level and returns the
