@@ -238,14 +238,35 @@ mod tests {
             .unwrap();
         let cold = Arc::new(RunGate::new(lock, true));
 
-        assert_eq!(
-            peak(
-                4,
-                |i| if i == 0 { cold.clone() } else { warm.clone() },
-                vec![1]
-            ),
-            3
-        );
+        // A warm run is in flight on another session; the cold session's first
+        // run must not start until it ends.
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let overlapped = Arc::new(AtomicUsize::new(usize::MAX));
+        let start = Arc::new(Barrier::new(2));
+
+        let runner = {
+            let (warm, in_flight, start) = (warm.clone(), in_flight.clone(), start.clone());
+            thread::spawn(move || {
+                warm.run(vec![vec![1]], || -> Result<(), ()> {
+                    in_flight.fetch_add(1, Ordering::SeqCst);
+                    start.wait();
+                    thread::sleep(Duration::from_millis(50));
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
+                })
+                .unwrap();
+            })
+        };
+
+        start.wait();
+        cold.run(vec![vec![1]], || -> Result<(), ()> {
+            overlapped.store(in_flight.load(Ordering::SeqCst), Ordering::SeqCst);
+            Ok(())
+        })
+        .unwrap();
+        runner.join().unwrap();
+
+        assert_eq!(overlapped.load(Ordering::SeqCst), 0);
     }
 
     #[test]
