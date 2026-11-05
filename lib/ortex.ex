@@ -43,6 +43,11 @@ defmodule Ortex do
         * `:timing_cache_dir` - where TensorRT keeps its timing cache, which
           speeds up later builds on the same card.
         * `:fp16` - build the engine in half precision. Defaults to `false`.
+        * `:profile` - `{min, opt, max}`, the smallest, usual and largest
+          input shapes the engine takes, each as ONNX Runtime writes them:
+          `"input:1x3x256x192"`, inputs comma separated. Without it TensorRT
+          builds for the shape of the first run. Give the same three on every
+          load of a cached engine, or ONNX Runtime rebuilds it.
 
   With the `coreml` feature, `:coreml` registers CoreML as an ML Program on
   the CPU and GPU, rather than through `ort`'s legacy NeuralNetwork flags.

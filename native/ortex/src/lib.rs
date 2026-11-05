@@ -26,14 +26,23 @@ fn init(
     opt: i32,
     intra_threads: Option<usize>,
     coreml_cache_dir: Option<String>,
-    tensorrt: Option<(Option<String>, Option<String>, bool)>,
+    tensorrt: Option<(
+        Option<String>,
+        Option<String>,
+        bool,
+        Option<(String, String, String)>,
+    )>,
 ) -> NifResult<ResourceArc<model::OrtexModel>> {
     let coreml = utils::wants_coreml(env, &eps);
-    let tensorrt = tensorrt.map(|(cache_dir, timing_cache_dir, fp16)| tensorrt::TensorRt {
-        cache_dir,
-        timing_cache_dir,
-        fp16,
-    });
+    let tensorrt =
+        tensorrt.map(
+            |(cache_dir, timing_cache_dir, fp16, profile)| tensorrt::TensorRt {
+                cache_dir,
+                timing_cache_dir,
+                fp16,
+                profile: profile.map(|(min, opt, max)| tensorrt::Profile { min, opt, max }),
+            },
+        );
     let eps = utils::map_eps(env, eps, tensorrt.as_ref())
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
     let coreml = coreml.then(|| model::CoreMl {

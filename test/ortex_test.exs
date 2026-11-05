@@ -120,6 +120,32 @@ defmodule OrtexTest do
       end
     end
 
+    test "a profile of three shapes leaves a load that does not ask for TensorRT alone" do
+      model =
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3,
+          tensorrt: [
+            cache_dir: "/tmp/engines",
+            profile: {"x:1x100", "x:4x100", "x:16x100"}
+          ]
+        )
+
+      assert %Ortex.Model{} = model
+    end
+
+    test "a profile must be three non-empty shape strings" do
+      for bad <- [
+            {"x:1", "x:1"},
+            {"x:1", "", "x:1"},
+            {"x:1", "x\0:1", "x:1"},
+            {:a, "x:1", "x:1"},
+            "x:1"
+          ] do
+        assert_raise ArgumentError, ~r/profile/, fn ->
+          Ortex.load("./models/tinymodel.onnx", [:cpu], 3, tensorrt: [profile: bad])
+        end
+      end
+    end
+
     test "fp16 must be a boolean" do
       assert_raise ArgumentError, ~r/fp16/, fn ->
         Ortex.load("./models/tinymodel.onnx", [:cpu], 3, tensorrt: [fp16: "yes"])

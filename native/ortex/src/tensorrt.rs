@@ -18,6 +18,21 @@ pub struct TensorRt {
     pub timing_cache_dir: Option<String>,
     /// Build the engine in half precision.
     pub fp16: bool,
+    /// The smallest, usual and largest input shapes the engine takes, each in
+    /// ONNX Runtime's `input:1x3x256x192` form, inputs comma separated. ONNX
+    /// Runtime builds one engine for the whole range, and needs the same three
+    /// again on each load of a cached engine, or it rebuilds the engine.
+    pub profile: Option<Profile>,
+}
+
+/// An explicit TensorRT optimization profile: `trt_profile_min_shapes`,
+/// `trt_profile_opt_shapes` and `trt_profile_max_shapes`. ONNX Runtime uses
+/// them only when all three are given, so they travel together.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Profile {
+    pub min: String,
+    pub opt: String,
+    pub max: String,
 }
 
 impl TensorRt {
@@ -44,7 +59,24 @@ impl TensorRt {
             "trt_fp16_enable",
             if self.fp16 { "1" } else { "0" }.to_string(),
         ));
+
+        if let Some(profile) = &self.profile {
+            options.push(("trt_profile_min_shapes", shapes(&profile.min, "min")?));
+            options.push(("trt_profile_opt_shapes", shapes(&profile.opt, "opt")?));
+            options.push(("trt_profile_max_shapes", shapes(&profile.max, "max")?));
+        }
+
         Ok(options)
+    }
+}
+
+fn shapes(value: &str, name: &str) -> Result<String, String> {
+    if value.is_empty() || value.contains('\0') {
+        Err(format!(
+            "the TensorRT profile's {name} shapes must be non-empty with no NUL byte"
+        ))
+    } else {
+        Ok(value.to_string())
     }
 }
 
@@ -168,6 +200,7 @@ mod tests {
             cache_dir: Some("/cache/engines".into()),
             timing_cache_dir: Some("/cache/timing".into()),
             fp16: true,
+            profile: None,
         };
 
         assert_eq!(
@@ -180,6 +213,48 @@ mod tests {
                 ("trt_fp16_enable", "1"),
             ]
         );
+    }
+
+    #[test]
+    fn a_profile_reaches_the_provider_as_its_three_shapes() {
+        let trt = TensorRt {
+            profile: Some(Profile {
+                min: "input:1x3x256x192".into(),
+                opt: "input:16x3x256x192".into(),
+                max: "input:16x3x256x192".into(),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            pairs(trt.options().unwrap()),
+            vec![
+                ("trt_fp16_enable", "0"),
+                ("trt_profile_min_shapes", "input:1x3x256x192"),
+                ("trt_profile_opt_shapes", "input:16x3x256x192"),
+                ("trt_profile_max_shapes", "input:16x3x256x192"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_or_nul_profile_shape_is_refused() {
+        for (min, opt, max, name) in [
+            ("", "a:1", "a:1", "min"),
+            ("a:1", "a\0:1", "a:1", "opt"),
+            ("a:1", "a:1", "", "max"),
+        ] {
+            let trt = TensorRt {
+                profile: Some(Profile {
+                    min: min.into(),
+                    opt: opt.into(),
+                    max: max.into(),
+                }),
+                ..Default::default()
+            };
+
+            assert!(trt.options().unwrap_err().contains(name));
+        }
     }
 
     #[test]

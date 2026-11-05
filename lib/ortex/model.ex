@@ -62,10 +62,12 @@ defmodule Ortex.Model do
       raise ArgumentError, "expected :tensorrt to be a keyword list, got: #{inspect(options)}"
     end
 
-    options = Keyword.validate!(options, cache_dir: nil, timing_cache_dir: nil, fp16: false)
+    options =
+      Keyword.validate!(options, cache_dir: nil, timing_cache_dir: nil, fp16: false, profile: nil)
 
     {tensorrt_dir!(:cache_dir, options[:cache_dir]),
-     tensorrt_dir!(:timing_cache_dir, options[:timing_cache_dir]), fp16!(options[:fp16])}
+     tensorrt_dir!(:timing_cache_dir, options[:timing_cache_dir]), fp16!(options[:fp16]),
+     profile!(options[:profile])}
   end
 
   defp tensorrt!(options) do
@@ -88,6 +90,27 @@ defmodule Ortex.Model do
   end
 
   defp fp16!(fp16) when is_boolean(fp16), do: fp16
+
+  defp profile!(nil), do: nil
+
+  defp profile!({min, opt, max} = profile) do
+    if Enum.all?([min, opt, max], &shapes?/1) do
+      profile
+    else
+      profile_error!(profile)
+    end
+  end
+
+  defp profile!(profile), do: profile_error!(profile)
+
+  defp shapes?(shapes),
+    do: is_binary(shapes) and shapes != "" and not String.contains?(shapes, <<0>>)
+
+  defp profile_error!(profile) do
+    raise ArgumentError,
+          "expected tensorrt :profile to be {min, opt, max}, three non-empty shape strings " <>
+            "with no NUL byte, got: #{inspect(profile)}"
+  end
 
   defp fp16!(fp16) do
     raise ArgumentError, "expected tensorrt :fp16 to be a boolean, got: #{inspect(fp16)}"
