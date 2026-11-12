@@ -32,6 +32,7 @@ fn init(
         bool,
         Option<(String, String, String)>,
     )>,
+    config_entries: Vec<(String, String)>,
 ) -> NifResult<ResourceArc<model::OrtexModel>> {
     let coreml = utils::wants_coreml(env, &eps);
     let tensorrt =
@@ -48,7 +49,7 @@ fn init(
     let coreml = coreml.then(|| model::CoreMl {
         cache_dir: coreml_cache_dir,
     });
-    let model = model::init(model_path, eps, coreml, opt, intra_threads)
+    let model = model::init(model_path, eps, coreml, opt, intra_threads, config_entries)
         .map_err(|e| rustler::Error::Term(Box::new(e.to_string())))?;
     Ok(ResourceArc::new(model))
 }

@@ -48,6 +48,56 @@ defmodule OrtexTest do
     end
   end
 
+  describe "config_entries" do
+    test "reach ONNX Runtime: asking for the ORT format refuses an ONNX file" do
+      assert_raise RuntimeError, fn ->
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3,
+          config_entries: [{"session.load_model_format", "ORT"}]
+        )
+      end
+
+      assert %Ortex.Model{} =
+               Ortex.load("./models/tinymodel.onnx", [:cpu], 3,
+                 config_entries: [{"session.load_model_format", "ONNX"}]
+               )
+    end
+
+    test "a session with KleidiAI off runs the model and answers as with it on" do
+      inputs = {
+        Nx.iota({1, 100}, type: :s32),
+        Nx.iota({1, 100}, type: :f32) |> Nx.divide(100)
+      }
+
+      on = Ortex.load("./models/tinymodel.onnx") |> Ortex.run(inputs)
+
+      off =
+        Ortex.load("./models/tinymodel.onnx", [:cpu], 3,
+          config_entries: [{"mlas.disable_kleidiai", "1"}]
+        )
+        |> Ortex.run(inputs)
+
+      for {a, b} <- Enum.zip(Tuple.to_list(on), Tuple.to_list(off)) do
+        assert Nx.to_flat_list(Nx.backend_transfer(a)) == Nx.to_flat_list(Nx.backend_transfer(b))
+      end
+    end
+
+    test "must be a list of string pairs with a key and no NUL byte" do
+      for bad <- [
+            %{},
+            [{"", "1"}],
+            [{"k", 1}],
+            [{:k, "1"}],
+            [{"k\0", "1"}],
+            [{"k", "v\0"}],
+            ["k"]
+          ] do
+        assert_raise ArgumentError, ~r/config_entries/, fn ->
+          Ortex.load("./models/tinymodel.onnx", [:cpu], 3, config_entries: bad)
+        end
+      end
+    end
+  end
+
   describe "intra_threads" do
     test "a session capped at one intra-op thread still runs the model" do
       model = Ortex.load("./models/tinymodel.onnx", [:cpu], 3, intra_threads: 1)

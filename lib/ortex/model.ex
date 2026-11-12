@@ -23,12 +23,20 @@ defmodule Ortex.Model do
 
   @doc false
   def load(path, eps \\ [:cpu], opt \\ 3, options \\ []) do
-    options = Keyword.validate!(options, intra_threads: nil, coreml_cache_dir: nil, tensorrt: nil)
+    options =
+      Keyword.validate!(options,
+        intra_threads: nil,
+        coreml_cache_dir: nil,
+        tensorrt: nil,
+        config_entries: []
+      )
+
     intra_threads = intra_threads!(intra_threads: options[:intra_threads])
     cache_dir = cache_dir!(options[:coreml_cache_dir])
     tensorrt = tensorrt!(options[:tensorrt])
+    config_entries = config_entries!(options[:config_entries])
 
-    case Ortex.Native.init(path, eps, opt, intra_threads, cache_dir, tensorrt) do
+    case Ortex.Native.init(path, eps, opt, intra_threads, cache_dir, tensorrt, config_entries) do
       {:error, msg} ->
         raise msg
 
@@ -53,6 +61,24 @@ defmodule Ortex.Model do
   defp cache_dir!(dir) do
     raise ArgumentError,
           "expected :coreml_cache_dir to be a non-empty path, got: #{inspect(dir)}"
+  end
+
+  defp config_entries!(entries) when is_list(entries) do
+    Enum.map(entries, fn
+      {key, value} when is_binary(key) and key != "" and is_binary(value) ->
+        if String.contains?(key <> value, <<0>>), do: config_entries_error!(entries)
+        {key, value}
+
+      _ ->
+        config_entries_error!(entries)
+    end)
+  end
+
+  defp config_entries!(entries), do: config_entries_error!(entries)
+
+  defp config_entries_error!(entries) do
+    raise ArgumentError,
+          "expected :config_entries to be a list of {key, value} strings with a non-empty key and no NUL byte, got: #{inspect(entries)}"
   end
 
   defp tensorrt!(nil), do: nil

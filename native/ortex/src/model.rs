@@ -57,6 +57,7 @@ pub fn init(
     coreml: Option<CoreMl>,
     opt: i32,
     intra_threads: Option<usize>,
+    config_entries: Vec<(String, String)>,
 ) -> Result<OrtexModel, Error> {
     // TODO: send tracing logs to erlang/elixir _somehow_
     // tracing_subscriber::fmt::init();
@@ -65,6 +66,10 @@ pub fn init(
 
     if let Some(threads) = intra_threads {
         builder = builder.with_intra_threads(threads)?;
+    }
+
+    for (key, value) in config_entries {
+        builder = builder.with_config_entry(key, value)?;
     }
 
     if let Some(coreml) = coreml {

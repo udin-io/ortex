@@ -49,6 +49,10 @@ defmodule Ortex do
           builds for the shape of the first run. Give the same three on every
           load of a cached engine, or ONNX Runtime rebuilds it.
 
+    * `:config_entries` - `{key, value}` strings handed to ONNX Runtime's
+      `AddSessionConfigEntry` before the session is built, such as
+      `{"mlas.disable_kleidiai", "1"}`. Defaults to `[]`.
+
   With the `coreml` feature, `:coreml` registers CoreML as an ML Program on
   the CPU and GPU, rather than through `ort`'s legacy NeuralNetwork flags.
 
