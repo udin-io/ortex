@@ -31,7 +31,8 @@ defmodule Ortex.Native do
         _optimization_level,
         _intra_threads,
         _coreml_cache_dir,
-        _tensorrt
+        _tensorrt,
+        _config_entries
       ),
       do: :erlang.nif_error(:nif_not_loaded)
 
